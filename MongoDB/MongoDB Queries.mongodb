@@ -1,0 +1,711 @@
+
+// Let's set the "collision_date" field datatype to Date
+
+db.california.find().forEach( function(doc) { 
+    doc['collision_date'] = new Date(doc['collision_date']); 
+    db.california.save(doc);
+})
+
+
+
+/* 
+    First Query
+
+    Show the total number and the percentage of collisions, injuries and deaths over the 
+    Californian roads throughout the years 2002-2020.
+*/
+
+db.california.aggregate(
+    {
+        $project : { 
+            year : {$year: "$collision_date"},
+            killed_victims : 1,
+            injured_victims: 1,
+            case_id : 1
+        }
+    },
+    {
+        $group : { 
+            _id : {year : "$year" },
+            collision_count: { $sum: 1 },
+            death_count : { $sum : "$killed_victims" },
+            injury_count : { $sum: "$injured_victims" }
+        }
+    },
+    {
+        $sort : { _id : 1 } 
+    }
+).pretty()
+
+/*
+Query explanation:
+    In order to perform this query, we have used the .aggregate pipeline to group several fields
+    and produce the single results we desire. We have extracted the year using $year in the
+    $project phase of the aggregation and also included it as our _id in $group ,in order to group by
+    the results based on that field. This practice is the equivalent of GROUP BY in MySQL.
+
+    We have also selected collision_count as the count of our documents, death_count as the sum of
+    killed_victims and injury count as the sum of injured_victims, and at the end we have sorted the
+    results based on _id ascending.
+*/
+
+
+
+
+
+
+
+
+
+
+/*
+    Second Query
+
+    Show the number of collisions, deaths, and injuries with their respective percentages, for 
+    each day of the week and every month of the year.
+*/
+
+db.california.aggregate(
+    {
+        $project : { 
+            month : { $month: "$collision_date" },
+            dayOfWeek : { $dayOfWeek :  "$collision_date" },
+            death_count : { $sum : "$killed_victims" },
+            collision_count: { $sum: 1 },
+            killed_victims : 1,
+            injured_victims: 1,
+        }
+    },
+    {
+        $group : { 
+            _id : { month: "$month", dayOfWeek : "$dayOfWeek" },
+            collision_count: { $sum: 1 },
+            death_count : { $sum : "$killed_victims" },
+            injury_count : { $sum: "$injured_victims" }
+        }
+    },
+    {
+        $addFields: {
+            death_percentage: {
+                $round : [ { 
+                    $multiply: [ { 
+                            $divide: [ "$death_count", "$collision_count" ] 
+                    }, 100 ] 
+                }, 2]
+            }
+        } 
+    },
+    {
+        $sort : { death_percentage : -1 } 
+    },
+    {
+    $limit : 8
+    }
+).pretty()
+
+
+
+/*
+Query explanation:
+    Inside the aggregation pipeline, we got the exact month of the collisions with the $month method,
+    and the day of the week with the $dayOfWeek method. We have selected both month and dayOfWeek as
+    our _id in the $group phase, then defined a new field as death_percentage , which was also used
+    to sort the result.
+*/
+
+
+
+
+
+
+
+
+
+/*
+    Third Query
+
+    Create a table to show the pedestrian action when the parties were crossing the road, 
+    and its relation to party race, to measure how many deaths caused by each action and ethnicity.
+*/
+
+db.california.aggregate(
+    {
+        $project : { 
+            pedestrian_action: 1,
+            party_race : 1,
+            killed_victims: 1
+        }
+    },
+    {
+        $match: {
+            $and: [ 
+                { pedestrian_action: /cross/ }, 
+                { pedestrian_action: { $ne: null } },
+                { party_race: { $ne: null } }  
+            ] 
+        } 
+    },
+    { 
+        $unwind: "$party_race" 
+    },
+    {
+        $group : { 
+            _id : { pedestrian_action: "$pedestrian_action", party_race: "$party_race" },
+            action_count: { $sum: 1 },
+            death_count : { $sum: "$killed_victims" }
+        }
+    },
+    {
+        $addFields: {
+            percentage: {
+                $round : [ { 
+                    $multiply: [ { 
+                            $divide: ["$death_count", "$action_count"] 
+                    }, 100 ] 
+                }, 2]
+            }
+        } 
+    },
+    {
+        $sort : { percentage : -1 } 
+    }
+).pretty()
+
+
+/*
+Query explanation:
+    At first, we filtered out our documents using the $match command to only consider the collisions
+     that involved pedestrians. To do so, we had to use a wildcard for the term “cross”. We also had
+     to use the $unwind command to deconstruct the array field in order to use it as _id in the $group
+     stage of the aggregation pipeline.
+*/
+
+
+
+
+
+
+
+
+/* 
+    Fourth Query
+
+    Check the relation between “alcohol_involved” with death and injuries with their respected percentages.
+*/
+
+db.california.aggregate(
+    {
+        $project : {
+            death_count : { $sum : "$killed_victims" },
+            collision_count: { $sum: 1 },
+            killed_victims : 1,
+            injured_victims: 1,
+            alcohol_involved: 1,
+            death_percentage : 1
+        }
+    },
+    {
+        $group : { 
+            _id : { $sum: { $cond: [{ $eq:["$alcohol_involved", true] }, 1, 0] } },
+            collision_count: {$sum: 1},
+            death_count : {$sum : "$killed_victims"},
+            injury_count : {$sum: "$injured_victims"}
+        }
+    },
+    { 
+        $addFields: {
+            death_percentage: {"$round" : [ { "$multiply": [ { "$divide": ["$death_count","$collision_count"] }, 100 ] }, 2]}
+        } 
+    },
+    { 
+        $sort : { 
+            death_percentage : -1 
+        } 
+    }
+).pretty()
+
+
+/*
+Query explanation:
+    This aggregation pipeline has almost the same structure as the previous queries. However, in the $group phase,
+    and more specifically in the _id section, we had to face a slight challenge because of the alcohol_involved field,
+    which is of type "boolean". Therefore, in order to define it as _id, we had to substitute the values from
+    true to 1 and from false to zero. This was achieved by using $cond , which is relatively close to the if statement
+    in other programming languages.
+*/
+
+/*
+    Looking at the results, we see with no surprise that even though the number of collisions which were involved
+    with alcohol is way less than the ones without it. The death percentage is quite high, standing at almost 37%.
+*/
+
+
+
+
+
+
+
+
+/* 
+    Fifth Query
+
+    Show the top 10 "life-threatening" vehicles (brands) among all the brands that registered at least 1,000 
+    collisions, along with the number of killed victims per vehicle and the percentage of collision/death ratio.
+*/
+
+db.california.aggregate(
+    {
+        $project : {
+            death_count : {$sum : "$killed_victims"},
+            collision_count: {$sum: 1},
+            killed_victims : 1,
+            injured_victims: 1,
+            death_percentage : 1,
+            vehicle_make: 1
+        }
+    },
+    {
+        $unwind: "$vehicle_make"
+    },
+    {
+        $group : { 
+            _id : "$vehicle_make",
+            collision_count: {$sum: 1},
+            death_count : {$sum : "$killed_victims"},
+            injury_count : {$sum: "$injured_victims"}
+        }
+    },
+    {
+        $match: {"collision_count": {$gt: 1000}}
+    },
+    { 
+        $addFields: {
+            death_percentage: {"$round" : [ { "$multiply": [ { "$divide": ["$death_count","$collision_count"] }, 100 ] }, 2]}
+        } 
+    },
+    { 
+        $sort : { death_percentage : -1 } 
+    },
+    {
+        $limit : 10
+    }
+).pretty()
+
+
+/*
+Query explanation:
+    In the aggregation pipeline, as we see we have almost the same fields, except vehicle_make, which represents
+    the vehicle brand registered per each party, which is nested in an array within each document. We have used
+    $unwind in order to use the vehicle brand as our _id in the $group stage. After defining the variables we need,
+    we used $match, to filter results for plus 1,000 collisions, and add the percentage field, sort the results and
+    use $limit in order to limit our query to show the top 10 results.
+*/
+
+/*
+    By looking at the results, we see the exact same brands as we’ve seen in the previous HW, motorcycle brands stand
+    as so-called “deadliest” vehicles when it comes to collisions. Our top 3 vehicles are Yamaha, Harley-Davidson and Kawasaki.
+*/
+
+
+
+
+
+
+
+
+
+
+
+/* 
+    Sixth Query
+
+    Check the death percentage of each collision when it is reported that the driver
+    was under the influence of drugs.
+*/
+
+db.california.aggregate([
+    {
+        $unwind : {
+            path : "$victim_role",
+            includeArrayIndex : "arrayIndex"
+        }
+    },
+    {
+        $match : {
+            victim_role : {$eq: "1"}
+        }
+    },
+    {
+        $project: {
+            party_type : { $arrayElemAt: [ "$party_type", "$arrayIndex" ] },
+            party_race : { $arrayElemAt: [ "$party_race", "$arrayIndex" ] },
+            party_sex: { $arrayElemAt: [ "$party_sex", "$arrayIndex" ] },
+            party_sobriety: { $arrayElemAt: [ "$party_sobriety", "$arrayIndex" ] },
+            party_drug_physical : { $arrayElemAt: [ "$party_drug_physical", "$arrayIndex" ] },
+            vehicle_year : { $arrayElemAt: [ "$vehicle_year", "$arrayIndex" ] },
+            vehicle_make: { $arrayElemAt: [ "$vehicle_make", "$arrayIndex" ] },
+            victim_degree_of_injury: { $arrayElemAt: [ "$victim_degree_of_injury", "$arrayIndex" ] },
+            victim_sex : { $arrayElemAt: [ "$victim_sex", "$arrayIndex" ] },
+            victim_age : { $arrayElemAt: [ "$victim_age", "$arrayIndex" ] },
+            killed_victims: 1,
+            injured_victims: 1
+        }
+    },
+    {
+        $match: { 
+            party_drug_physical : "E"
+        }
+    },
+    {
+        $group: {
+            _id : {Ethnicity : "$party_race"},
+            collision_count : {$sum : 1},
+            death_count : {$sum: "$killed_victims"}
+        }
+    },
+    { 
+        $addFields: {
+            death_percentage: {$round : [ { $multiply: [ { $divide: ["$death_count","$collision_count"] }, 100 ] }, 2]}
+        }
+    },
+    {
+        $sort : {death_percentage : -1}
+    }        
+]).pretty()
+
+
+/*
+Query explanation:
+    For executing this query, first we had to $unwind the victim_role field inside our documents, and include
+    their index in arrayIndex, we did this because we wanted to check the results only for the “drivers” and
+    then we matched the victim roles by the values that are equal to one ("1"), as it means driver.
+
+    Therefore, in the $project phase we had to select all the variables that are related to the drivers by using
+    $arrayElemAt and using our index that we have created and matched in the previous phase of the aggregation.
+    At the end we again filtered our results by matching the party_drug_influence equal to "E", because it stands
+    for the party being under influence of drugs, selecting the party_race as our _id in $group aggregation and
+    at the end adding the percentage and sorting them by death percentage.
+*/
+
+/*
+    The results are quite interesting as no matter the ethnicity, being under the influence of drugs stands as one
+    of the deadliest scenarios when it comes to collisions.
+*/
+
+
+
+
+
+
+
+
+
+
+/* 
+    Seventh Query
+
+    We know that on 4th March 2020 California state went under lockdown because of Covid-19 virus.
+    We also know that the latest document in our collection goes back to 9th October 2020.
+    Compare the number of collisions, deaths, and injuries at the same period in 2019.
+
+*/
+
+db.california.aggregate([
+    { 
+        $match:
+            {
+            collision_date: {
+            $gte: ISODate("2019-03-04T00:00:00.000Z"),
+            $lt: ISODate("2019-10-09T00:00:00.000Z")
+            }
+        }
+    },
+    { 
+        $project: {
+            death_count : {$sum : "$killed_victims"},
+            collision_count: {$sum: 1},
+            year : {$year : "$collision_date"},
+            killed_victims : 1,
+            injured_victims: 1,
+            collision_date: 1
+        }
+    },
+    {
+        $group : { 
+            _id : {year: "$year" },
+            action_count: { $sum: 1 },
+            death_count : { $sum: "$killed_victims" },
+            injured_victims: { $sum: "$injured_victims"}
+        }
+    },
+    {
+        $unionWith: { 
+            coll: "california",
+            pipeline: [ { 
+                $match: {
+                    collision_date: {
+                    $gte: ISODate("2020-03-04T00:00:00.000Z"),
+                    $lt: ISODate("2020-10-09T00:00:00.000Z") }
+                }
+            },
+            { 
+                $project: {
+                    death_count : {$sum : "$killed_victims"},
+                    collision_count: {$sum: 1},
+                    year : {$year : "$collision_date"},
+                    killed_victims : 1,
+                    injured_victims: 1,
+                    collision_date: 1,
+                    datetimeEnd: 1
+                }
+            },
+            {
+                $group : { 
+                    _id : {year: "$year" },
+                    action_count: { $sum: 1 },
+                    death_count : { $sum: "$killed_victims" },
+                    injured_victims: { $sum: "$injured_victims"}
+                }
+            } ]
+        }
+    }
+]).pretty()
+
+
+/*
+Query explanation:
+    We have used $union_with in order to combine the results, made by 2 separate queries, therefore, for 2019,
+    we matched the collision_date to be not less than ($lt) 9th October 2019 and not greater than ($gt) 4th March 2019,
+    we defined our variables in the $project, and selected $year as our _id to represent the aggregation data for
+    the year 2019, and by using $union_with, with almost the same pipeline as the first part just changing the year to 2020.
+*/
+
+
+
+
+
+
+
+
+
+
+
+
+/* 
+    Eighth Query
+
+    Show how many cars has been 10 years or older at the time 
+    of collision grouped by the ethnicity of the party.
+*/
+
+
+db.california.aggregate([
+    {
+        $unwind : {
+            path : "$victim_role",
+            includeArrayIndex : "arrayIndex"}
+        },
+    {
+        $match : {
+            victim_role : {$eq: "1"}
+        }
+    },
+    {
+        $project: {
+            year : {$year : "$collision_date"},
+            party_type : { $arrayElemAt: [ "$party_type", "$arrayIndex" ] },
+            party_race : { $arrayElemAt: [ "$party_race", "$arrayIndex" ] },
+            party_sex: { $arrayElemAt: [ "$party_sex", "$arrayIndex" ] },
+            party_sobriety: { $arrayElemAt: [ "$party_sobriety", "$arrayIndex" ] },
+            party_drug_physical : { $arrayElemAt: [ "$party_drug_physical", "$arrayIndex" ] },
+            vehicle_year : { $arrayElemAt: [ "$vehicle_year", "$arrayIndex" ] },
+            vehicle_make: { $arrayElemAt: [ "$vehicle_make", "$arrayIndex" ] },
+            victim_degree_of_injury: { $arrayElemAt: [ "$victim_degree_of_injury", "$arrayIndex" ] },
+            victim_sex : { $arrayElemAt: [ "$victim_sex", "$arrayIndex" ] },
+            victim_age : { $arrayElemAt: [ "$victim_age", "$arrayIndex" ] },
+            killed_victims: 1,
+            injured_victims: 1
+        }
+    },
+    { 
+        $addFields: {
+            car_age : { $subtract: ["$year" , {$toInt: "$vehicle_year" }]}
+        } 
+    },
+    {
+        $match : {
+            car_age : {"$gt": 10}
+        }
+    },
+    {
+        $group: {
+            _id: {Ethnicity: "$party_race"},
+            vehicle_counts : {$sum : 1}
+            }
+        },
+    { 
+        $addFields: {
+            percentage: {"$round" : [ { "$multiply": [ { "$divide": ["$vehicle_counts", 221912] }, 100 ] }, 2]}
+        } 
+    },
+    {
+        $sort : {percentage : -1}
+    }  
+]).pretty()
+
+
+/*
+Query explanation:
+    Since we want to be discrete about the “drivers”, we use almost the same approach we had with the 6th query,
+    the only difference is to extract the $year of the collision and subtract it from the vehicle_year, and $match
+    the results with their car_age being older than 10 years using $gt, at the end we grouped by party_race as our
+    _id in the $group stage, and add the percentage field in $addFields section.
+*/
+
+/*
+    Looking at the results, we see that Hispanic and white people have more older cars compared to other ethnicities
+    as Hispanics stand at 14.05%.
+*/
+
+
+
+
+
+
+
+
+
+
+/* 
+    Ninth Query
+
+    Check what was the lighting situation of the road for the collisions 
+    and their relation to number of deaths with their respected percentages.
+*/
+
+
+db.california.aggregate([
+    {
+        $match : {
+            lighting_condition : { $ne: "daylight" }
+        }
+    },
+    {
+        $project : {
+            lighting_condition : 1,
+            alcohol_involved : 1,
+            killed_victims : 1,
+            injured_victims : 1
+        }
+    }
+    {
+        $group: {
+            _id : {
+                lighting_condition : "$lighting_condition", 
+                alcohol_involved : {
+                    $sum: { $cond: [{ $eq:["$alcohol_involved", true] }, 1, 0]}
+                }
+            },
+            collision_count : { $sum : 1 },
+            death_count : { $sum: "$killed_victims" },
+            injured_count : { $sum: "$injured_victims" }
+        }
+    },
+    {
+        $addFields: {
+            death_percentage: {
+                $round : [ { 
+                    $multiply: [ { 
+                        $divide: ["$death_count","$collision_count"] 
+                    }, 100 ] 
+                }, 2]
+            }
+        } 
+    },
+    {
+        $sort : {death_percentage : -1}
+    }
+]).pretty()
+
+
+/*
+Query explanation:
+    As our first move in the aggregation pipeline, we used $match to exclude the daylight in our lighting condition
+    because as we know during the day we don’t need any light.
+    We defined our variables in the $project stage and at the $group stage, we set lighting_condition and
+    alcohol_involved as our _id, and added the collision_count, death_count, injuried_count and death_percentage,
+    and at the end we $sort them by death percentage descending.
+*/
+
+
+
+
+
+
+
+
+
+
+/* 
+    Tenth Query
+
+    Show the count of all the violation categories that their primary collision factor
+    has been registered as ‘vehicle code violation’, and the number of deaths and
+    injuries associated with each of them.
+
+*/
+
+
+db.california.aggregate([
+    {
+        $match : {
+            primary_collision_factor : { $eq: "vehicle code violation" }
+        }
+    },
+    {
+        $project : {
+            primary_collision_factor : 1,
+            pcf_violation_category : 1,
+            killed_victims : 1,
+            injured_victims : 1
+        }
+    },
+    {
+        $group : {
+            _id : { Violation_Category : "$pcf_violation_category" },
+            collision_count : { $sum : 1 },
+            death_count : { $sum: "$killed_victims" },
+            injured_count : { $sum: "$injured_victims" }
+        }
+    },
+    { 
+        $addFields: {
+            death_percentage: {
+                $round : [ { 
+                    $multiply: [ { 
+                        $divide: [ "$death_count", "$collision_count" ] 
+                    }, 100 ] 
+                }, 2]
+            }
+        }
+    },
+    {
+        $sort: {death_percentage : -1}
+    }
+]).pretty()
+
+
+/*
+Query explanation:
+    First of all, we $match the primary_collision_factor to be equal to 'vehicle code violation'.
+    By using $project we used the primary_collision_factor, and pc_violation_category along with
+    other important fields we’ll need. In the $group phase in the aggregation pipeline, we set the
+    pcf_violation_category as our _id to group the result by that field. At the end we added the
+    percentage field, and sorted the results.
+*/
+
+/*
+    Looking at the results here, with no surprise we see DUI (or driving under influence) as the deadliest
+    Violation Category, way above the second factor standing with 36%.
+*/
+
