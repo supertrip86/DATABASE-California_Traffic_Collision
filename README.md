@@ -23,12 +23,12 @@ There is a data dictionary [here](https://tims.berkeley.edu/help/SWITRS.php): He
 * Giovanni Giunta
 
 
-## Goal of the project: 
+### Goal of the project: 
     > 1. Convert the `.sqlite` file to MySQL and perform the normal queries, along with the optimized ones.
     > 2. Export the `.json` file from MySQL Workbench and load it MongoDB and perform queries on them.
 
 
-## Main Steps:
+### Main Steps:
     > 1. Data conversion to MySQL
     > 2. Writing MySQL queries
     > 3. Data conversion to MongoDB
@@ -36,7 +36,7 @@ There is a data dictionary [here](https://tims.berkeley.edu/help/SWITRS.php): He
     > 5. Writing MongoDB queries
 
 
-### MySQL: 
+### `MySQL`: 
 After downloading the .SQLite database file from Kaggle, we started our Data Preparation process.
 
 First, we inspected the database tables and columns of the .SQLite file, hoping to find some indications on how to build the relational schemas:
@@ -89,8 +89,6 @@ Then, it is necessary to import the converted .sql file to MySQL using the follo
 ```
 
 Alternatively, it is possible to use the Data Import/Restore tool from within the MySQL Workbench Administration panel:
-
-
 
 Before going any further, we scanned the engine behind the imported database tables:
 
@@ -181,7 +179,22 @@ We can now start with the implementation of the database queries.
 
 
 ### `MongoDB`: 
-    > 1.`Read This Before.pdf` file in which you will find all the preprocessing steps required for performing the MongoDB queries.
-    > 2. `MySQL Exporting.sql` file in which you will find the way to combine the data and extract it.
-    > 3. `Python Preprocessing.ipynb` file in which you will find the final preprocessing phase in Python in order to create the last `.json` file.
-    > 4. `MonoDB Scripts.mongodb` file containing 10 queries and their respected explanations.
+
+In MySQL, after grouping and storing all the data in the table "main" with the given SQL script, export the data as a json file with MySQL Workbench. Then, use the provided Jupyter Notebook to preprocess all the data and dump the result into an additional json file (opt_main.json).
+Use the command below to create a "traffic" database in mongoDB with a collection called "california", where all the records in "opt_main.json" are going to be saved.
+Make sure that the "mongoimport" service is registered into the global PATH environment in your Windows machine.
+
+```
+PS> C:\Users\user> mongoimport --db traffic --collection california --drop --jsonArray --batchSize 1 --file opt_main.json
+```
+
+to complete the preprocessing part, run this last command in mongoDB to save all the Dates in the Database as Datetime Objects, so be to able to run queries that can perform conditionals and comparisons over Dates:
+
+```
+db.california.find().forEach( function(doc) {
+ doc['collision_date'] = new Date(doc['collision_date']);
+ db.california.save(doc);
+})
+```
+
+
